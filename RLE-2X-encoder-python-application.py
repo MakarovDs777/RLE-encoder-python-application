@@ -1,3 +1,4 @@
+
 import tkinter as tk
 from tkinter import filedialog, messagebox
 
@@ -13,26 +14,44 @@ def setup_clipboard_bindings(widget):
 
     # Windows/Linux: Ctrl
     widget.bind("<Control-c>", gen("<<Copy>>"))
-    widget.bind("<Control-v>", gen("<<Paste>>"))
     widget.bind("<Control-x>", gen("<<Cut>>"))
-    widget.bind("<Control-a>", lambda e: (widget.tag_add("sel", "1.0", "end"), "break"))
+    widget.bind("<Control-v>", gen("<<Paste>>"))
+    widget.bind(
+        "<Control-a>",
+        lambda e: (widget.tag_add("sel", "1.0", "end"), "break"),
+    )
 
     # macOS: Command
     widget.bind("<Command-c>", gen("<<Copy>>"))
-    widget.bind("<Command-v>", gen("<<Paste>>"))
     widget.bind("<Command-x>", gen("<<Cut>>"))
-    widget.bind("<Command-a>", lambda e: (widget.tag_add("sel", "1.0", "end"), "break"))
+    widget.bind("<Command-v>", gen("<<Paste>>"))
+    widget.bind(
+        "<Command-a>",
+        lambda e: (widget.tag_add("sel", "1.0", "end"), "break"),
+    )
 
     # При клике — ставим фокус в виджет
     widget.bind("<Button-1>", lambda e: widget.focus_set())
 
     # Контекстное меню (правый клик)
     menu = tk.Menu(widget, tearoff=0)
-    menu.add_command(label="Копировать", command=lambda: widget.event_generate("<<Copy>>"))
-    menu.add_command(label="Вставить", command=lambda: widget.event_generate("<<Paste>>"))
-    menu.add_command(label="Вырезать", command=lambda: widget.event_generate("<<Cut>>"))
+    menu.add_command(
+        label="Копировать",
+        command=lambda: widget.event_generate("<<Copy>>"),
+    )
+    menu.add_command(
+        label="Вставить",
+        command=lambda: widget.event_generate("<<Paste>>"),
+    )
+    menu.add_command(
+        label="Вырезать",
+        command=lambda: widget.event_generate("<<Cut>>"),
+    )
     menu.add_separator()
-    menu.add_command(label="Выделить всё", command=lambda: widget.tag_add("sel", "1.0", "end"))
+    menu.add_command(
+        label="Выделить всё",
+        command=lambda: widget.tag_add("sel", "1.0", "end"),
+    )
 
     def show_menu(event):
         try:
@@ -40,8 +59,8 @@ def setup_clipboard_bindings(widget):
         finally:
             menu.grab_release()
 
-    widget.bind("<Button-3>", show_menu)
-    widget.bind("<Control-Button-1>", show_menu)  # для macOS
+    widget.bind("<Button-3>", show_menu)  # Windows/Linux
+    widget.bind("<Button-2>", show_menu)  # macOS
 
 
 def parse_numbers_from_file(filepath):
@@ -62,144 +81,80 @@ def parse_numbers_from_file(filepath):
     return numbers
 
 
-def find_interleaved_patterns(numbers):
+def rle_encode(numbers):
     """
-    Ищет паттерны вида: одно и то же число A повторяется через один элемент.
-    То есть позиции 0, 2, 4, ... содержат одно и то же число A —
-    это «W-паттерн» длины N (N повторов числа A через один).
-    
-    Также ищет паттерны на нечётных позициях: 1, 3, 5, ...
-    
-    Возвращает список токенов, где обычные числа остаются как int,
-    а W-паттерны представлены как tuple: ("W", длина_паттерна, число_A).
+    Кодирует список чисел в RLE (run-length encoding).
+    Возвращает список строк формата: 'число количество'
+    Пример: [0,0,0,255,255] -> ['0 3', '255 2']
     """
     if not numbers:
         return []
-    
-    n = len(numbers)
-    used = [False] * n
-    tokens = []
-    
-    i = 0
-    while i < n:
-        if used[i]:
-            i += 1
-            continue
-        
-        # --- Проверяем паттерн на чётных позициях относительно i ---
-        # Ищем максимальную длину L такую, что numbers[i] == numbers[i+2] == numbers[i+4] == ...
-        # и все числа между ними (i+1, i+3, ...) НЕ равны numbers[i]
-        value = numbers[i]
-        L = 1  # как минимум одно вхождение (само число)
-        j = i + 2
-        while j < n and numbers[j] == value and not used[j]:
-            # Проверяем, что промежуточные элементы не равны value
-            # (иначе это был бы обычный RLE-блок)
-            all_intermediate_different = True
-            for k in range(i + 1, j):
-                if numbers[k] == value:
-                    all_intermediate_different = False
-                    break
-            if not all_intermediate_different:
-                break
-            L += 1
-            j += 2
-        
-        if L >= 3:
-            # Нашли W-паттерн: число value повторяется L раз через один
-            tokens.append(("W", L, value))
-            # Помечаем использованные позиции
-            for k in range(L):
-                used[i + k * 2] = True
-            # Пропускаем весь блок
-            # Но нужно проверить: может, после блока тоже начать сдвиг
-            # Переходим к следующему неиспользованному элементу после блока
-            i += 1
-            continue
-        
-        # --- Проверяем паттерн на нечётных позициях (сдвиг на 1) ---
-        # То есть проверяем: numbers[i+1] == numbers[i+3] == numbers[i+5] == ...
-        # Начинаем с i+1, если оно не использовано
-        if i + 1 < n and not used[i + 1]:
-            value2 = numbers[i + 1]
-            L2 = 1
-            j = i + 3
-            while j < n and numbers[j] == value2 and not used[j]:
-                all_intermediate_different = True
-                for k in range(i + 2, j):
-                    if numbers[k] == value2:
-                        all_intermediate_different = False
-                        break
-                if not all_intermediate_different:
-                    break
-                L2 += 1
-                j += 2
-            
-            if L2 >= 3:
-                tokens.append(("W", L2, value2))
-                for k in range(L2):
-                    used[i + 1 + k * 2] = True
-                i += 1
-                continue
-        
-        # Обычное число — не паттерн
-        tokens.append(numbers[i])
-        used[i] = True
-        i += 1
-    
-    return tokens
 
-
-def rle_encode_tokens(tokens):
-    """
-    Кодирует список токенов (int или tuple("W", L, value)) в текстовые строки.
-    
-    Обычные числа кодируются классическим RLE: 'число количество'
-    W-паттерны кодируются как: 'W:длина:число' и занимают ровно одну строку.
-    
-    Возвращает список строк.
-    """
-    if not tokens:
-        return []
-    
     result = []
-    i = 0
-    while i < len(tokens):
-        token = tokens[i]
-        
-        if isinstance(token, tuple) and token[0] == "W":
-            # W-паттерн: одна строка
-            _, L, value = token
-            result.append(f"W:{L}:{value}")
-            i += 1
+    current_value = numbers[0]
+    count = 1
+
+    for num in numbers[1:]:
+        if num == current_value:
+            count += 1
         else:
-            # Обычные числа — собираем RLE-серию подряд идущих одинаковых
-            current = token
+            result.append(f"{current_value} {count}")
+            current_value = num
             count = 1
-            i += 1
-            while i < len(tokens) and tokens[i] == current and not isinstance(tokens[i], tuple):
-                count += 1
-                i += 1
-            result.append(f"{current} {count}")
-    
+
+    # Последняя серия
+    result.append(f"{current_value} {count}")
     return result
 
 
-def encode_interleaved(numbers):
+def compress_singles(encoded_lines):
     """
-    Двухэтапное сжатие:
-    1. Найти W-паттерны (повтор через один).
-    2. Оставшиеся числа сжать классическим RLE.
-    
-    Возвращает список строк для вывода.
+    Пост-обработка RLE-результата:
+    Группы подряд идущих строк вида 'X 1' (число X с количеством 1)
+    заменяются на одну строку 'W:N:X', где N — количество таких строк,
+    а X — значение, которое повторяется.
+    Сами значения (без '1') дублируются следом для возможности
+    восстановления при декодировании.
+
+    Пример:
+      ['248 1', '252 1', '250 1', '248 1', '255 3', '10 1', '20 1']
+      -> ['W:4:1', '248', '252', '250', '248', '255 3', 'W:2:1', '10', '20']
     """
-    tokens = find_interleaved_patterns(numbers)
-    encoded = rle_encode_tokens(tokens)
-    return encoded
+    if not encoded_lines:
+        return []
+
+    result = []
+    i = 0
+    while i < len(encoded_lines):
+        line = encoded_lines[i]
+        parts = line.split()
+        # Проверяем, имеет ли строка формат 'число 1'
+        if len(parts) == 2 and parts[1] == "1":
+            value = parts[0]
+            count = 0
+            start = i
+            # Собираем все подряд идущие 'X 1' с одинаковым X
+            while i < len(encoded_lines):
+                p = encoded_lines[i].split()
+                if len(p) == 2 and p[1] == "1" and p[0] == value:
+                    count += 1
+                    i += 1
+                else:
+                    break
+            # Добавляем W-строку
+            result.append(f"W:{count}:{value}")
+            # Добавляем сами значения (без '1') для восстановления
+            for j in range(start, start + count):
+                result.append(encoded_lines[j].split()[0])
+        else:
+            result.append(line)
+            i += 1
+
+    return result
 
 
 def load_and_encode():
-    """Открывает файл, парсит числа, выполняет сжатие и заполняет табло."""
+    """Открывает файл, парсит числа, выполняет RLE-кодирование и заполняет табло."""
     global raw_numbers
 
     path = filedialog.askopenfilename(
@@ -211,7 +166,7 @@ def load_and_encode():
     try:
         numbers = parse_numbers_from_file(path)
     except Exception as e:
-        messagebox.showerror("Ошибка", f"Не удалось прочитать файл: {e}")
+        messagebox.showerror("Ошибка", f"Не удалось прочитать файл:\n{e}")
         return
 
     if not numbers:
@@ -220,8 +175,8 @@ def load_and_encode():
 
     raw_numbers = numbers
 
-    # Двухэтапное сжатие: W-паттерны + RLE
-    encoded_lines = encode_interleaved(numbers)
+    # RLE-кодирование + сжатие одиночных серий
+    encoded_lines = compress_singles(rle_encode(numbers))
 
     # Вывод в табло
     text_widget.config(state="normal")
@@ -229,22 +184,10 @@ def load_and_encode():
     text_widget.insert("1.0", "\n".join(encoded_lines))
 
     # Статистика
-    original_count = len(numbers)
-    encoded_count = len(encoded_lines)
-    
-    # Подсчитываем, сколько чисел «покрыто» W-паттернами
-    w_covered = 0
-    for line in encoded_lines:
-        if line.startswith("W:"):
-            parts = line.split(":")
-            w_covered += int(parts[1])  # длина паттерна
-    
-    compression_ratio = encoded_count / original_count if original_count > 0 else 0
-
     status_var.set(
-        f"Загружено чисел: {original_count} | Строк после сжатия: {encoded_count} | "
-        f"Коэффициент сжатия: {compression_ratio:.2%} | "
-        f"Чисел в W-паттернах: {w_covered}"
+        f"Загружено чисел: {len(numbers)} | "
+        f"Строк в табло: {len(encoded_lines)} | "
+        f"Коэффициент сжатия: {len(encoded_lines) / len(numbers):.2%}"
     )
 
 
@@ -258,7 +201,7 @@ def save_text_to_file():
     file_path = filedialog.asksaveasfilename(
         defaultextension=".txt",
         filetypes=[("Text files", "*.txt"), ("All files", "*.*")],
-        title="Сохранить сжатые данные как...",
+        title="Сохранить RLE-данные как...",
     )
     if not file_path:
         return
@@ -280,10 +223,10 @@ def clear_text():
     status_var.set("Готов")
 
 
-def decode_to_numbers():
+def decode_rle_to_numbers():
     """
-    Декодирует сжатый формат (RLE + W-паттерны) обратно в исходный список чисел
-    и показывает в отдельном окне.
+    Декодирует RLE (включая W-сжатие) из текстового поля обратно
+    в исходный список чисел и показывает в отдельном окне.
     """
     txt = text_widget.get("1.0", tk.END).strip()
     if not txt:
@@ -291,52 +234,60 @@ def decode_to_numbers():
         return
 
     numbers = []
-    for i, raw_line in enumerate(txt.splitlines(), start=1):
-        line = raw_line.strip()
-        if not line:
+    i = 0
+    lines_list = txt.splitlines()
+    while i < len(lines_list):
+        raw_line = lines_list[i].strip()
+        if not raw_line:
+            i += 1
             continue
 
-        if line.startswith("W:"):
-            # Формат: W:длина:число
-            parts = line.split(":")
-            if len(parts) != 3:
+        # Проверяем, является ли строка W-сжатием
+        if raw_line.startswith("W:"):
+            w_parts = raw_line.split(":")
+            if len(w_parts) != 3:
                 messagebox.showerror(
                     "Ошибка формата",
-                    f"Строка {i}: W-паттерн должен иметь формат W:длина:число, получено: '{raw_line}'",
+                    f"Строка {i+1}: неверный формат W-записи: '{raw_line}' "
+                    f"(ожидается W:N:X)",
                 )
                 return
             try:
-                w_len = int(parts[1])
-                w_value = int(parts[2])
+                w_count = int(w_parts[1])
+                w_value = int(w_parts[2])
             except ValueError:
                 messagebox.showerror(
                     "Ошибка формата",
-                    f"Строка {i}: неверный формат чисел в W-паттерне: '{raw_line}'",
+                    f"Строка {i+1}: неверные числа в W-записи: '{raw_line}'",
                 )
                 return
-            # W-паттерн длины L означает L повторов числа через один:
-            # A, X, A, X, A, X, ... (L раз A)
-            # При декодировании мы НЕ знаем, что было между ними (X),
-            # поэтому НЕ можем восстановить точную исходную последовательность
-            # без дополнительной информации.
-            #
-            # Нужно сохранять «промежуточные» числа! 
-            # Поэтому меняем формат W на хранение полной последовательности.
-            messagebox.showerror(
-                "Ошибка",
-                "Текущий формат W-паттернов не позволяет однозначно восстановить "
-                "исходную последовательность без промежуточных чисел.\n\n"
-                "Пожалуйста, используйте кнопку «Показать исходные числа» "
-                "(работает только если файл был загружен в этой сессии).",
-            )
-            return
+            # Следующие w_count строк — это сами значения
+            for j in range(w_count):
+                i += 1
+                if i >= len(lines_list):
+                    messagebox.showerror(
+                        "Ошибка формата",
+                        f"W-запись '{raw_line}' ожидает {w_count} значений, "
+                        f"но файл закончился",
+                    )
+                    return
+                val_line = lines_list[i].strip()
+                try:
+                    numbers.append(int(val_line))
+                except ValueError:
+                    messagebox.showerror(
+                        "Ошибка формата",
+                        f"Строка {i+1}: ожидается число, получено: '{val_line}'",
+                    )
+                    return
         else:
-            # Классический RLE: число количество
-            parts = line.split()
+            # Обычная RLE-строка: значение количество
+            parts = raw_line.split()
             if len(parts) != 2:
                 messagebox.showerror(
                     "Ошибка формата",
-                    f"Строка {i}: ожидается 2 числа (значение и количество), найдено {len(parts)}: '{raw_line}'",
+                    f"Строка {i+1}: ожидается 2 числа (значение и количество), "
+                    f"найдено {len(parts)}: '{raw_line}'",
                 )
                 return
             try:
@@ -345,19 +296,16 @@ def decode_to_numbers():
             except ValueError:
                 messagebox.showerror(
                     "Ошибка формата",
-                    f"Строка {i}: неверный формат чисел: '{raw_line}'",
+                    f"Строка {i+1}: неверный формат чисел: '{raw_line}'",
                 )
                 return
             numbers.extend([value] * count)
 
+        i += 1
+
     # Показываем результат в новом окне
-    show_numbers_window(numbers, "Декодированные числа")
-
-
-def show_numbers_window(numbers, title_suffix=""):
-    """Вспомогательная функция: показывает список чисел в отдельном окне."""
     win = tk.Toplevel(root)
-    win.title(f"{title_suffix} ({len(numbers)} шт.)")
+    win.title(f"Декодированные числа ({len(numbers)} шт.)")
     win.geometry("700x500")
 
     text_frame = tk.Frame(win)
@@ -371,25 +319,17 @@ def show_numbers_window(numbers, title_suffix=""):
 
     # Выводим числа через пробел, с переносами для читаемости
     chunk_size = 50
-    lines = []
-    for i in range(0, len(numbers), chunk_size):
-        chunk = numbers[i : i + chunk_size]
-        lines.append(" ".join(str(n) for n in chunk))
-    out_text.insert("1.0", "\n".join(lines))
+    lines_output = []
+    for idx in range(0, len(numbers), chunk_size):
+        chunk = numbers[idx : idx + chunk_size]
+        lines_output.append(" ".join(str(n) for n in chunk))
+    out_text.insert("1.0", "\n".join(lines_output))
     out_text.config(state="disabled")
-
-
-def show_original_numbers():
-    """Показывает исходные (raw) числа, загруженные из файла."""
-    if not raw_numbers:
-        messagebox.showwarning("Нет данных", "Сначала загрузите файл с числами.")
-        return
-    show_numbers_window(raw_numbers, "Исходные числа")
 
 
 # --- GUI ---
 root = tk.Tk()
-root.title("RLE-кодировщик v2: W-паттерны (повтор через один) + RLE")
+root.title("RLE-кодировщик: сжатие одинаковых чисел подряд + W-сжатие")
 root.geometry("900x650")
 
 # --- Верхняя панель ---
@@ -402,14 +342,9 @@ load_btn = tk.Button(
 load_btn.pack(side=tk.LEFT, padx=(0, 6))
 
 decode_btn = tk.Button(
-    top_frame, text="Декодировать обратно", command=decode_to_numbers
+    top_frame, text="Декодировать обратно", command=decode_rle_to_numbers
 )
 decode_btn.pack(side=tk.LEFT, padx=(0, 6))
-
-show_original_btn = tk.Button(
-    top_frame, text="Показать исходные числа", command=show_original_numbers
-)
-show_original_btn.pack(side=tk.LEFT, padx=(0, 6))
 
 clear_btn = tk.Button(top_frame, text="Очистить табло", command=clear_text)
 clear_btn.pack(side=tk.LEFT, padx=(0, 6))
@@ -417,7 +352,7 @@ clear_btn.pack(side=tk.LEFT, padx=(0, 6))
 save_btn = tk.Button(top_frame, text="Сохранить как .txt", command=save_text_to_file)
 save_btn.pack(side=tk.LEFT)
 
-# --- Текстовая область для сжатого результата ---
+# --- Текстовая область для RLE-результата ---
 text_frame = tk.Frame(root)
 text_frame.pack(fill=tk.BOTH, expand=True, padx=8, pady=6)
 
@@ -447,13 +382,12 @@ status_bar.pack(fill=tk.X, padx=0, pady=0)
 hint = tk.Label(
     root,
     text=(
-        "Форматы вывода:\n"
-        "  ЧИСЛО КОЛИЧЕСТВО — классический RLE (одинаковые числа подряд).\n"
-        "  W:ДЛИНА:ЧИСЛО — W-паттерн: число повторяется через один (мин. 3 повтора).\n"
-        "Кнопка «Показать исходные числа» показывает оригинал (только в текущей сессии)."
+        "Формат вывода: ЧИСЛО КОЛИЧЕСТВО (RLE-кодирование). "
+        "Группы одиночных значений сжимаются в W:N:X, где N — количество, "
+        "X — значение. Кнопка «Декодировать обратно» восстанавливает "
+        "исходную последовательность."
     ),
     anchor="w",
-    justify="left",
     font=("Segoe UI", 9),
 )
 hint.pack(fill=tk.X, padx=8, pady=(0, 8))
